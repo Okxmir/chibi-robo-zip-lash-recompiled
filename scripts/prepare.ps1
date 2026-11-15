@@ -12,8 +12,8 @@ $ProgressPreference = 'SilentlyContinue'
 $pinned = '3047d9e990be4ac2c84174cb570dfec569c882e9'
 $rustVersion = '1.90.0-x86_64-pc-windows-msvc'
 
-function Get-VerifiedArchive([string] $Name, [string] $Url, [string] $Sha256) {
-    $path = Join-Path $dependencies $Name
+function Get-VerifiedArchive([string] $Name, [string] $Url, [string] $Sha256, [string] $Directory = $dependencies) {
+    $path = Join-Path $Directory $Name
     if (!(Test-Path -LiteralPath $path)) {
         $partial = "$path.partial"
         Invoke-WebRequest -UseBasicParsing -Uri $Url -OutFile $partial -TimeoutSec 240
@@ -27,10 +27,20 @@ function Get-VerifiedArchive([string] $Name, [string] $Url, [string] $Sha256) {
 Push-Location -LiteralPath $ProjectRoot
 try {
     New-Item -ItemType Directory -Path 'logs','extracted','generated/chibi-eur' -Force | Out-Null
+    $localDependencies = Get-ChibiDependencies
+    $sdlDir = Join-Path $localDependencies 'SDL3-3.4.0-src'
+    if (!(Test-Path -LiteralPath "$sdlDir/CMakeLists.txt")) {
+        New-Item -ItemType Directory -Path $localDependencies -Force | Out-Null
+        $sdl = Get-VerifiedArchive 'SDL3-3.4.0.tar.gz' 'https://github.com/libsdl-org/SDL/releases/download/release-3.4.0/SDL3-3.4.0.tar.gz' '082CBF5F429E0D80820F68DC2B507A94D4CC1B4E70817B119BBB8EC6A69584B8' $localDependencies
+        $stagedSdl = "$sdlDir-$([Guid]::NewGuid().ToString('N'))"
+        New-Item -ItemType Directory -Path $stagedSdl | Out-Null
+        tar.exe -xf $sdl -C $stagedSdl --strip-components=1
+        if ($LASTEXITCODE -ne 0) { throw "Could not unpack $sdl." }
+        Move-Item -LiteralPath $stagedSdl -Destination $sdlDir
+    }
     if (!$Upstream) {
         New-Item -ItemType Directory -Path $dependencies -Force | Out-Null
         $clockwork = Get-VerifiedArchive 'clockwork-pinned.zip' "https://codeload.github.com/watchmakerers/clockwork/zip/$pinned" '7923E82994E3A06F7AA17DFDB2A6E25A608E3495227BAF1A0FDBCC32DFBE1DED'
-        $sdl = Get-VerifiedArchive 'SDL3-devel-3.4.0-VC.zip' 'https://github.com/libsdl-org/SDL/releases/download/release-3.4.0/SDL3-devel-3.4.0-VC.zip' '4489BA0070B8CE047B8717E4B71FA7E35AC71362E7A6BB2A90A7A27F624B3D5D'
         $xbyakCommit = 'df112862583c2d327c1d9782fd28f53aa675f11d'
         $xbyak = Get-VerifiedArchive 'xbyak-pinned.zip' "https://codeload.github.com/herumi/xbyak/zip/$xbyakCommit" 'B0E8D74A5813D4C4D2BAA550B889B7F7C2696E471DFB8DE1554CE47F7E52D7F8'
         $dxc = Get-VerifiedArchive 'dxc_2025_07_14.zip' 'https://github.com/microsoft/DirectXShaderCompiler/releases/download/v1.8.2505.1/dxc_2025_07_14.zip' '9AD895A6B039E3A8F8C22A1009F866800B840A74B50DB9218D13319E215EA8A4'
@@ -40,9 +50,6 @@ try {
         if (!(Test-Path -LiteralPath "$dependencies/clockwork-master/runtime")) {
             Expand-Archive -LiteralPath $clockwork -DestinationPath $dependencies -Force
             Move-Item -LiteralPath "$dependencies/clockwork-$pinned" -Destination "$dependencies/clockwork-master"
-        }
-        if (!(Test-Path -LiteralPath "$dependencies/SDL3-3.4.0/cmake/SDL3Config.cmake")) {
-            Expand-Archive -LiteralPath $sdl -DestinationPath $dependencies -Force
         }
         if (!(Test-Path -LiteralPath "$dependencies/xbyak-$xbyakCommit/xbyak/xbyak.h")) {
             Expand-Archive -LiteralPath $xbyak -DestinationPath $dependencies -Force

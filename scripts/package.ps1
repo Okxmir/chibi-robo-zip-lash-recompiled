@@ -12,7 +12,7 @@ $licenses = Join-Path $dist 'licenses'
 New-Item -ItemType Directory -Path $licenses -Force | Out-Null
 $dependencies = Get-ChibiDependencies $Upstream
 Copy-Item -LiteralPath "$ProjectRoot/LICENSE" -Destination "$licenses/Clockwork.txt" -Force
-Copy-Item -LiteralPath "$dependencies/SDL3-3.4.0/LICENSE.txt" -Destination "$licenses/SDL.txt" -Force
+Copy-Item -LiteralPath "$ProjectRoot/build/upstream/SDL3-3.4.0-src/LICENSE.txt" -Destination "$licenses/SDL.txt" -Force
 Copy-Item -LiteralPath "$dependencies/xbyak-df112862583c2d327c1d9782fd28f53aa675f11d/COPYRIGHT" -Destination "$licenses/Xbyak.txt" -Force
 if ($Language) {
     $languageIds = @{ en = 1; fr = 2; de = 3; es = 5; it = 4 }
