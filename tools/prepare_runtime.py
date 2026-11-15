@@ -35,6 +35,12 @@ def frontend(source):
                      '    if (!std::getenv("CHIBI_NO_DIALOG")) fatal_hook = show_fatal;')
     source = replace(source, 'if (s.gpu_renderer) {', 'if (s.gpu_renderer && !std::getenv("CHIBI_CPU_PICA")) {')
     source = replace(source,
+        "            SDL_SetBooleanProperty(props, SDL_PROP_GPU_DEVICE_CREATE_SHADERS_SPIRV_BOOLEAN, true);",
+        """            SDL_SetBooleanProperty(props, SDL_PROP_GPU_DEVICE_CREATE_SHADERS_SPIRV_BOOLEAN, true);
+#ifdef __linux__
+            SDL_SetBooleanProperty(props, SDL_PROP_GPU_DEVICE_CREATE_VULKAN_REQUIRE_HARDWARE_ACCELERATION_BOOLEAN, true);
+#endif""")
+    source = replace(source,
         "    open_audio();\n    if (audio_stream) SDL_SetAudioStreamGain(audio_stream, float(s.volume) / 100.0f);",
         """    open_audio();
     if (audio_stream) {
@@ -365,6 +371,15 @@ static inline void recomp_follow_tail(Ctx *ctx) {
 def kernel_dispatch(source):
     source = replace(source, "const auto start_time = std::chrono::steady_clock::now();",
         "auto start_time = std::chrono::steady_clock::now();")
+    source = replace(source, "        timers.erase(timers.begin());\n        fn();",
+        """        timers.erase(timers.begin());
+        fn();
+#ifdef __linux__
+        // Give guest threads a chance to acquire the kernel lock when a slow
+        // host keeps several periodic callbacks overdue.
+        if (!timers.empty() && timers.begin()->first <= ticks())
+            k().timer_cv.wait_for(lk, std::chrono::microseconds(100));
+#endif""")
     source = replace(source, "void init(const GameImage &game) {",
         "void init(const GameImage &game) {\n    start_time = std::chrono::steady_clock::now();")
     source = replace(source, "void switch_to(Thread *next) {\n", """void switch_to(Thread *next) {

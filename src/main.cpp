@@ -1,5 +1,6 @@
 #include "dump.h"
 #include "frontend/frontend.h"
+#include "frontend/settings.h"
 #include "game_code.h"
 #include "kernel/kernel.h"
 #include "loader.h"
@@ -16,6 +17,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -43,6 +45,9 @@ extern "C" void recomp_restore_guest_context(Ctx *ctx, uint32_t target) {
 namespace {
 constexpr uint64_t title_id = 0x0004000000162f00;
 constexpr const char *partition = "CHIBI-EUR.cxi";
+constexpr const char *cartridge_required =
+    "Use your own decrypted European Chibi-Robo! Zip Lash cartridge image (CTR-P-BXLP). "
+    "Put the .3ds, .cci, or .cxi file next to the game executable or pass its path.";
 constexpr std::array<uint8_t, 32> code_hash = {
     0xa8, 0x2c, 0x32, 0xe5, 0x09, 0x3a, 0xbb, 0x0f, 0x2f, 0x59, 0xe9, 0xbf, 0x81, 0x81, 0x92, 0x57,
     0xfd, 0xce, 0x9d, 0x34, 0x08, 0x8d, 0xcc, 0x7f, 0x73, 0x49, 0xa7, 0x21, 0xdb, 0x58, 0x79, 0xc5,
@@ -68,6 +73,46 @@ LONG WINAPI report_access_violation(EXCEPTION_POINTERS *exception) {
     return EXCEPTION_CONTINUE_SEARCH;
 }
 #endif
+
+std::filesystem::path find_local_cartridge(const std::filesystem::path &directory) {
+    std::error_code error;
+    const std::filesystem::directory_iterator end;
+    std::filesystem::path image;
+    for (std::filesystem::directory_iterator it(directory, error); !error && it != end; it.increment(error)) {
+        const auto &path = it->path();
+        if (!it->is_regular_file(error)) continue;
+        const auto extension = path.extension().string();
+        if (SDL_strcasecmp(extension.c_str(), ".3ds") != 0 &&
+            SDL_strcasecmp(extension.c_str(), ".cci") != 0 &&
+            SDL_strcasecmp(extension.c_str(), ".cxi") != 0) continue;
+        if (peek_program_id(path) != title_id) continue;
+        if (!image.empty()) return {};
+        image = path;
+    }
+    return image;
+}
+
+std::filesystem::path pick_cartridge() {
+    if (!SDL_InitSubSystem(SDL_INIT_VIDEO)) fatal("%s\n\n%s", cartridge_required, SDL_GetError());
+    struct Selection {
+        std::atomic<bool> done{false};
+        std::string path, error;
+    } selection;
+    static constexpr SDL_DialogFileFilter filters[] = {{"Decrypted 3DS cartridge images", "3ds;cci;cxi"}};
+    SDL_ShowOpenFileDialog([](void *userdata, const char *const *files, int) {
+        auto &result = *static_cast<Selection *>(userdata);
+        if (!files) result.error = SDL_GetError();
+        else if (*files) result.path = *files;
+        result.done.store(true, std::memory_order_release);
+    }, &selection, nullptr, filters, 1, nullptr, false);
+    while (!selection.done.load(std::memory_order_acquire)) {
+        SDL_PumpEvents();
+        SDL_Delay(16);
+    }
+    SDL_QuitSubSystem(SDL_INIT_VIDEO);
+    if (!selection.error.empty()) fatal("%s\n\nFile picker: %s", cartridge_required, selection.error.c_str());
+    return std::filesystem::u8path(selection.path);
+}
 
 GameImage load(const char *path) {
     if (peek_program_id(path) != title_id)
@@ -142,7 +187,7 @@ int main(int argc, char **argv) {
     if (argc == 2 && std::string_view(argv[1]) == "--poll-gamepad") return frontend::poll_gamepad();
     if (argc == 3 && std::string_view(argv[1]) == "--verify-startup") return verify_startup(argv[2]);
     if (argc > 2 || (argc == 2 && std::string_view(argv[1]) == "--help")) {
-        std::puts("ChibiRoboZipLash [path to decrypted CHIBI-EUR.cxi]");
+        std::puts("ChibiRoboZipLash [path to a decrypted European .3ds, .cci, or .cxi image]");
         return argc > 2 ? 2 : 0;
     }
     if (!std::getenv("CHIBI_NO_DIALOG")) {
@@ -151,11 +196,30 @@ int main(int argc, char **argv) {
         };
     }
     const char *base = SDL_GetBasePath();
-    const std::filesystem::path executable = base ? base : ".";
-    auto image = executable / partition;
-    if (!std::filesystem::is_regular_file(image)) image = executable / ".." / "extracted" / partition;
-    if (!std::filesystem::is_regular_file(image)) image = executable / ".." / ".." / "extracted" / partition;
-    if (argc == 2) image = argv[1];
+    const auto executable = std::filesystem::u8path(base ? base : ".");
+    std::filesystem::path image;
+    if (argc == 2) {
+        image = argv[1];
+    } else {
+        for (const auto &directory : {executable, executable / ".." / "extracted",
+                                     executable / ".." / ".." / "extracted"}) {
+            image = directory / partition;
+            if (std::filesystem::is_regular_file(image)) break;
+            image.clear();
+        }
+        if (image.empty()) image = find_local_cartridge(executable);
+        if (image.empty()) {
+            auto &settings = frontend::settings();
+            settings.load();
+            if (!settings.game_path.empty() && peek_program_id(settings.game_path) == title_id)
+                image = settings.game_path;
+        }
+        if (image.empty()) {
+            if (std::getenv("CHIBI_NO_DIALOG")) fatal("%s", cartridge_required);
+            image = pick_cartridge();
+            if (image.empty()) return 0;
+        }
+    }
     if (!std::filesystem::is_regular_file(image)) fatal("Cartridge image not found: %s", image.string().c_str());
     frontend::run(play, image.string().c_str());
 }

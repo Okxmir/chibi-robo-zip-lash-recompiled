@@ -2,7 +2,15 @@
 
 An experimental Windows x64 and Linux x86-64 port of the European Nintendo 3DS release. The build statically translates the original ARM and Thumb program and loads assets from a local copy of the cartridge.
 
-## Build and play
+## Play from a release
+
+Download the Windows x64 or Linux x86-64 RAR from the [releases page](https://github.com/Okxmir/chibi-robo-zip-lash-recompiled/releases) and extract the whole archive.
+
+Open `ChibiRoboZipLash.exe` on Windows or `ChibiRoboZipLash` on Linux. Use your own decrypted European cartridge image (`CTR-P-BXLP`, in `.3ds`, `.cci`, or `.cxi` format). The game finds a compatible image next to the executable or lets you select one. On Linux, you can also launch it from a terminal with `./ChibiRoboZipLash "/path/to/YourRom.3ds"`.
+
+The prebuilt Linux release was tested on Ubuntu 24.04 and requires glibc 2.38 or newer, libstdc++, and OpenSSL 3.
+
+## Build from source
 
 On Windows x64, install Visual Studio with the **Desktop development with C++** workload and CMake tools, and install **Python 3.11 or newer** with pip. Put your decrypted European cartridge image (`CTR-P-BXLP`) in the project folder.
 
